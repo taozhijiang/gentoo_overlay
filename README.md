@@ -34,10 +34,10 @@ Numix-Circle
 - 字体：infinality + 宋体  
 在行内有一句话，高分屏用什么字体都好看，低分屏用什么字体都渣渣。都这么多年头了，手机都2K屏了，笔记本居然还是720p。低分屏字体需要优化一下，不然太难看了。下面的方案是折腾了很久感觉最耐看、最好效果的。（见图）  
 安装app-eselect/eselect-infinality和media-libs/fontconfig-infinality，然后  
- ```bash sudo eselect infinality set 2 [infinality]
-sudo eselect lcdfilter set 3 [infinality]
-sudo eselect fontconfig disable/enable
- ```
+sudo eselect infinality set 2 [infinality]  
+sudo eselect lcdfilter set 3 [infinality]  
+sudo eselect fontconfig disable/enable  
+
 将fontconfig中除了52-infinality.conf和65-nonlatin.conf两个enable之外，所有的conf都disable掉。  
 再将你windows系统的宋体（simsun.ttc）安装到Linux系统，修改/etc/fonts/conf.d/65-nonlatin.conf，第一个字体用好看的英文字体（宋体的英文显示太难看了，我用的Liberation Sans），然后跟中文宋体（NSimSun），这样在显示的时候，英文会优先使用第一个字体，然后遇到中文没法显示的时候，用下面的宋体显示。然后你GNOME中所有的字体都设置成Liberation Sans就可以了。
 
