@@ -1,0 +1,138 @@
+# Create pool
+zpool create -f -o ashift=12 -o cachefile=/tmp/zpool.cache -O normalization=formD -m none -R /mnt/gentoo rpool /dev/sdb3
+
+# Create rootfs
+zfs create -o mountpoint=none rpool/ROOT
+zfs create -o mountpoint=/ rpool/ROOT/gentoo
+
+# Build fs，创建这样另外一个ZFS文件系统的原因是，主文件系统rpool/ROOT/可以经常快照备份，这个文件系统不用备份，就节省了空间，同时重装系统的时候，这部分文件系统也不用迁移。
+zfs create -o mountpoint=none rpool/GENTOO
+zfs create -o mountpoint=/usr/portage/distfiles -o atime=off rpool/GENTOO/portage
+zfs create -o mountpoint=/var/tmp/portage -o sync=disabled rpool/GENTOO/build-dir
+
+# Set bootfs
+zpool set bootfs=rpool/ROOT/gentoo rpool
+
+# Download stage3
+wget http://mirrors.ustc.edu.cn/gentoo/releases/amd64/autobuilds/current-stage3-amd64/stage3-amd64-20160121.tar.bz2
+
+# Extract stage3
+tar -xvjpf stage3-amd64-*.tar.bz2 -C /mnt/gentoo
+
+# Copy zpool.cache into chroot
+mkdir -p /mnt/gentoo/etc/zfs
+cp /tmp/zpool.cache /mnt/gentoo/etc/zfs/zpool.cache
+
+# Copy resolv.conf into chroot
+# (The "-L" option is needed to make sure we don't copy a symbolic link)
+cp -L /etc/resolv.conf /mnt/gentoo/etc/resolv.conf
+
+# Mount filesystems
+mount -t proc none /mnt/gentoo/proc
+mount --rbind /dev /mnt/gentoo/dev
+mount --rbind /sys /mnt/gentoo/sys
+mount --make-rslave /mnt/gentoo/dev
+mount --make-rslave /mnt/gentoo/sys
+
+# chroot
+chroot /mnt/gentoo /bin/bash
+env-update; source /etc/profile; export PS1="(chroot) $PS1"; cd
+
+# Get portage snapshot，下载快照，然后再同步更新一下会快很多的
+env GENTOO_MIRRORS="http://mirrors.ustc.edu.cn" emerge-webrsync
+emerge --sync
+
+# 修改/etc/portage/make.conf文件，这里是基础的配置，我已经将自己的make.conf放到库里面了，大家可以酌情修改
+-march=native
+MAKEOPTS="-j5"
+GENTOO_MIRRORS="http://mirrors.ustc.edu.cn/gentoo/"
+SYNC="rsync://mirrors.ustc.edu.cn/gentoo-portage" 
+ 
+# 修改使用的profile类型，我用的desktop/gnome/systemd
+eselect profile list
+eselect profile set 5
+
+# Install genkernel
+emerge sys-kernel/genkernel
+
+# Install sources
+emerge sys-kernel/gentoo-sources
+
+# Build initial kernel (required for checks in sys-kernel/spl and sys-fs/zfs)
+# FIXME: Make genkernel support modules_prepare
+genkernel kernel --no-clean --no-mountboot --menuconfig
+
+# Install ZFS
+echo "sys-kernel/spl ~amd64" >> /etc/portage/package.accept_keywords
+echo "sys-fs/zfs-kmod ~amd64" >> /etc/portage/package.accept_keywords
+echo "sys-fs/zfs ~amd64" >> /etc/portage/package.accept_keywords
+emerge sys-fs/zfs
+
+# Add zfs to boot runlevel
+rc-update add zfs boot
+systemctl enable zfs
+
+# Flush the page cache to ensure GRUB2 sees the latest disk content
+echo 1 > /proc/sys/vm/drop_caches
+
+# Install GRUB2
+echo "sys-boot/grub:2 libzfs" >> /etc/portage/package.use
+echo "sys-boot/grub:2 ~amd64" >> /etc/portage/package.accept_keywords
+emerge sys-boot/grub:2
+touch /etc/mtab
+grub2-install /dev/sdb
+
+#######xxxxx
+zpool import -f -o cachefile= -R /mnt/gentoo rpool
+
+# We must create an empty configuration file so genkernel fines the right one.
+touch /boot/grub/grub.cfg
+
+# Build kernel and initramfs
+genkernel all --no-clean --no-mountboot --zfs --bootloader=grub2 --callback="emerge @module-rebuild" --menuconfig
+
+# Comment the BOOT, ROOT and SWAP lines in /etc/fstab
+sed -i -e "s/\(.*\)\/\(BOOT\|ROOT\|SWAP\)\(.*\)/\#\1\/\2\3/g" /etc/fstab
+
+#
+# Follow chapters 8 through 12 of Gentoo Handboook: http://www.gentoo.org/doc/en/handbook/
+#
+
+# useradd -m -G users user
+# passwd user
+# /etc/init.d/sshd start
+
+# Make recovery snapshot after booting into new install
+zfs snapshot rpool/ROOT/gentoo@install_20141102
+
+# Additional tips
+# ARC tuning - You can configure the RAM that ARC uses in bytes 这里是512Mb
+echo options zfs zfs_arc_max=536870912 >> /etc/modprobe.d/zfs.conf
+
+
+# ZFS其它部分：
+（1）安装镜像：
+官方的install-amd64-minimal-20160121.iso是不带zfs支持的，所以用
+http://ftp.osuosl.org/pub/funtoo/distfiles/sysresccd/sysresccd-4.5.2_zfs_0.6.4.iso
+烧录到U盘中启动，然后再行安装
+
+（2）有时候不一定安装成功，需要重启系统，可以先卸载文件系统，下次启动成功后重新挂载zfs文件系统，然后chroot继续安装
+文件系统卸载：
+zpool export -f zpool
+挂载文件系统:
+zpool import -f -o cachefile= -R /mnt/gentoo rpool
+
+（3）系统迁移
+系统迁移我认为是zfs十分厉害的东西，既可以用作备份，也可以用于重装系统
+备份：
+zfs snapshot -r rpool@go_to_new
+zfs send -Rv rpool@go_to_new | gzip > /mnt/rpool_go_to_new.gz
+迁移：
+新机器上先建立好zpool池，然后：
+gzcat /mnt/rpool_go_to_new.gz | zfs receive -Fv zroot
+再修复一下grub就可以了！
+
+（4）ZFS还不支持TRIM，且稳定性在Linux上应该没有大型企业严格的测试，所以
+我的ZFS只用于系统分区，数据分区我会用xfs（稳定、性能高、支持discard）
+
+
