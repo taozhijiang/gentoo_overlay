@@ -1,0 +1,11 @@
+[Unit]
+Description=LXC Web Panel
+
+[Service]
+ExecStart=/usr/bin/python2 /usr/share/lxc-webpanel/lwp.py $OPTIONS
+ExecReload=/bin/kill -HUP $MAINPID
+ExecStop=/usr/bin/pkill lwp.py
+KillMode=process
+
+[Install]
+WantedBy=multi-user.target

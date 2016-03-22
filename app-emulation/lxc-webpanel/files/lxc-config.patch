@@ -1,0 +1,57 @@
+diff --git a/lwp.py b/lwp.py
+index eee5ff7..fa5c5f0 100644
+--- a/lwp.py
++++ b/lwp.py
+@@ -922,4 +922,4 @@ def check_session_limit():
+             session['last_activity'] = now
+ 
+ if __name__ == '__main__':
+-    app.run(host=app.config['ADDRESS'], port=app.config['PORT'])
++    app.run(host=app.config['ADDRESS'], port=app.config['PORT'], debug=False)
+diff --git a/lwp/__init__.py b/lwp/__init__.py
+index 9ba9a76..2e37e99 100644
+--- a/lwp/__init__.py
++++ b/lwp/__init__.py
+@@ -289,10 +289,8 @@ def get_container_settings(name):
+     returns a dict of all utils settings for a container
+     '''
+ 
+-    if os.geteuid():
+-        filename = os.path.expanduser('~/.local/share/lxc/%s/config' % name)
+-    else:
+-        filename = '/var/lib/lxc/%s/config' % name
++    lxcpath = subprocess.check_output(["lxc-config", "lxc.lxcpath"]).strip()
++    filename = lxcpath + '/%s/config' % name
+ 
+     if not file_exist(filename):
+         return False
+@@ -421,11 +419,8 @@ def push_config_value(key, value, container=None):
+             return values
+ 
+     if container:
+-        if os.geteuid():
+-            filename = os.path.expanduser('~/.local/share/lxc/%s/config' %
+-                                          container)
+-        else:
+-            filename = '/var/lib/lxc/%s/config' % container
++        lxcpath = subprocess.check_output(["lxc-config", "lxc.lxcpath"]).strip()
++        filename = lxcpath + '/%s/config' % container
+ 
+         save = save_cgroup_devices(filename=filename)
+ 
+diff --git a/lxclite/__init__.py b/lxclite/__init__.py
+index 2dc6cc0..1061777 100644
+--- a/lxclite/__init__.py
++++ b/lxclite/__init__.py
+@@ -144,10 +144,7 @@ def ls():
+     Note: Directory mode for Ubuntu 12/13 compatibility
+     '''
+ 
+-    if os.geteuid():
+-        base_path = os.path.expanduser("~/.local/share/lxc/")
+-    else:
+-        base_path = '/var/lib/lxc'
++    base_path = subprocess.check_output(["lxc-config", "lxc.lxcpath"]).strip()
+ 
+     try:
+         ct_list = [x for x in os.listdir(base_path)
